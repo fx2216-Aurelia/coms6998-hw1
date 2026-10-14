@@ -503,6 +503,59 @@ export default function Home() {
             }
         };
 
+        const renderCanvasFallback = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = 900;
+            canvas.height = 1200;
+            const context = canvas.getContext('2d');
+            if (!context) throw new Error('Canvas is unavailable in this browser.');
+
+            context.fillStyle = '#fdfbf7';
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            const scene = context.createLinearGradient(0, 0, 900, 560);
+            scene.addColorStop(0, '#e8f4ec');
+            scene.addColorStop(1, '#fbf5e7');
+            context.fillStyle = scene;
+            context.fillRect(0, 0, 900, 560);
+            context.fillStyle = 'rgba(255, 255, 255, 0.65)';
+            context.beginPath();
+            context.arc(690, 145, 82, 0, Math.PI * 2);
+            context.fill();
+            context.fillStyle = '#b7d0b8';
+            context.beginPath();
+            context.ellipse(280, 510, 420, 115, 0, Math.PI, Math.PI * 2);
+            context.ellipse(730, 535, 360, 130, 0, Math.PI, Math.PI * 2);
+            context.fill();
+
+            const lines = (card.innerText || '')
+                .split('\n')
+                .map((line) => line.trim())
+                .filter((line) => line && !/download polaroid|preparing image/i.test(line));
+            context.fillStyle = '#292524';
+            context.font = '26px Georgia, serif';
+            let y = 620;
+            for (const line of lines) {
+                const words = line.split(/\s+/);
+                let currentLine = '';
+                for (const word of words) {
+                    const candidate = currentLine ? `${currentLine} ${word}` : word;
+                    if (context.measureText(candidate).width > 800 && currentLine) {
+                        context.fillText(currentLine, 52, y);
+                        y += 38;
+                        currentLine = word;
+                    } else {
+                        currentLine = candidate;
+                    }
+                }
+                if (currentLine && y < 1150) {
+                    context.fillText(currentLine, 52, y);
+                    y += 48;
+                }
+                if (y >= 1150) break;
+            }
+            return canvas.toDataURL('image/png');
+        };
+
         setDownloadingCard(generationId);
         try {
             let imageDataUrl: string;
@@ -510,7 +563,12 @@ export default function Home() {
                 imageDataUrl = await renderExport(false);
             } catch (error) {
                 console.error('Polaroid export with proxied images failed; retrying clean render:', error);
-                imageDataUrl = await renderExport(true);
+                try {
+                    imageDataUrl = await renderExport(true);
+                } catch (fallbackError) {
+                    console.error('Clean Polaroid render failed; creating a canvas-safe export:', fallbackError);
+                    imageDataUrl = renderCanvasFallback();
+                }
             }
             const downloadLink = document.createElement('a');
             downloadLink.download = 'stoic-journal.png';
