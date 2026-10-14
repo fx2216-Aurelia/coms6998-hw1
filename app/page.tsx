@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { User } from '@supabase/supabase-js';
-import html2canvas from 'html2canvas';
 import { createClient } from '@/lib/client';
 import GoogleSignInButton from '@/components/GoogleSignInButton';
 import SignOutButton from '@/components/SignOutButton';
@@ -440,24 +439,153 @@ export default function Home() {
 
         setDownloadingCard(generationId);
         try {
-            const images = Array.from(card.querySelectorAll('img'));
-            await Promise.all(images.map(async (image) => {
+            const image = card.querySelector('img');
+            if (image) {
                 image.loading = 'eager';
-                await image.decode();
-                if (image.naturalWidth === 0 || image.naturalHeight === 0) {
-                    throw new Error('The card illustration did not finish loading.');
+                if (!image.complete) {
+                    await new Promise<void>((resolve, reject) => {
+                        image.addEventListener('load', () => resolve(), { once: true });
+                        image.addEventListener('error', () => reject(new Error('The illustration could not be loaded.')), { once: true });
+                    });
+                } else {
+                    await image.decode();
                 }
-            }));
+                if (image.naturalWidth === 0 || image.naturalHeight === 0) {
+                    throw new Error('The illustration did not finish loading.');
+                }
+            }
 
-            const canvas = await html2canvas(card, {
-                useCORS: true,
-                allowTaint: false,
-                scale: 2,
-                backgroundColor: '#FDFBF7',
-            });
+            const canvas = document.createElement('canvas');
+            canvas.width = 800;
+            canvas.height = 1100;
+            const context = canvas.getContext('2d');
+            if (!context) throw new Error('Canvas is unavailable in this browser.');
+
+            const text = (selector: string) =>
+                card.querySelector<HTMLElement>(selector)?.textContent?.trim() ?? '';
+            const paragraphs = Array.from(card.querySelectorAll('p'));
+            const name = paragraphs[0]?.textContent?.trim() || 'Anonymous';
+            const location = paragraphs[1]?.textContent?.replace(/^📍\s*/, '').trim() || 'Morningside';
+            const date = text('time');
+            const stress = text('span').replace(/^🔥\s*/, '');
+            const quote = card.querySelector('blockquote p')?.textContent?.trim() ?? '';
+            const source = card.querySelector('blockquote cite')?.textContent?.trim() ?? '';
+            const advice = paragraphs.at(-1)?.textContent?.trim() ?? '';
+
+            const drawCanvas = (includeImage: boolean) => {
+                context.clearRect(0, 0, canvas.width, canvas.height);
+                context.fillStyle = '#fdfbf7';
+                context.shadowColor = 'rgba(41, 37, 36, 0.16)';
+                context.shadowBlur = 24;
+                context.shadowOffsetY = 10;
+                context.beginPath();
+                context.roundRect(18, 18, 764, 1064, 18);
+                context.fill();
+                context.shadowColor = 'transparent';
+                context.shadowBlur = 0;
+                context.shadowOffsetY = 0;
+                context.strokeStyle = '#e7e1d8';
+                context.lineWidth = 2;
+                context.stroke();
+
+                context.fillStyle = '#292524';
+                context.textBaseline = 'top';
+                context.font = '600 20px Georgia, serif';
+                context.fillText(name.slice(0, 42), 58, 55, 430);
+                context.fillStyle = '#78716c';
+                context.font = '16px Georgia, serif';
+                context.fillText(`📍 ${location}`.slice(0, 58), 58, 84, 430);
+                context.textAlign = 'right';
+                context.fillText(date, 742, 58, 235);
+                context.textAlign = 'left';
+
+                const imageX = 58;
+                const imageY = 132;
+                const imageWidth = 684;
+                const imageHeight = 390;
+                context.save();
+                context.beginPath();
+                context.roundRect(imageX, imageY, imageWidth, imageHeight, 10);
+                context.clip();
+                if (includeImage && image && image.naturalWidth > 0) {
+                    const sourceRatio = image.naturalWidth / image.naturalHeight;
+                    const targetRatio = imageWidth / imageHeight;
+                    let cropX = 0;
+                    let cropY = 0;
+                    let cropWidth = image.naturalWidth;
+                    let cropHeight = image.naturalHeight;
+                    if (sourceRatio > targetRatio) {
+                        cropWidth = image.naturalHeight * targetRatio;
+                        cropX = (image.naturalWidth - cropWidth) / 2;
+                    } else {
+                        cropHeight = image.naturalWidth / targetRatio;
+                        cropY = (image.naturalHeight - cropHeight) / 2;
+                    }
+                    context.drawImage(image, cropX, cropY, cropWidth, cropHeight, imageX, imageY, imageWidth, imageHeight);
+                } else {
+                    context.fillStyle = '#e8f4ec';
+                    context.fillRect(imageX, imageY, imageWidth, imageHeight);
+                    context.fillStyle = '#496b57';
+                    context.font = 'italic 26px Georgia, serif';
+                    context.textAlign = 'center';
+                    context.fillText('A quiet moment to reset', canvas.width / 2, imageY + imageHeight / 2);
+                    context.textAlign = 'left';
+                }
+                context.restore();
+                context.strokeStyle = '#e7e1d8';
+                context.lineWidth = 2;
+                context.strokeRect(imageX, imageY, imageWidth, imageHeight);
+
+                context.font = '600 16px Arial, sans-serif';
+                const badgeWidth = Math.min(220, context.measureText(stress).width + 34);
+                context.fillStyle = '#fef3c7';
+                context.beginPath();
+                context.roundRect(58, 546, badgeWidth, 36, 18);
+                context.fill();
+                context.fillStyle = '#78350f';
+                context.fillText(stress || 'Stress: —/10', 74, 556);
+
+                const drawWrappedText = (value: string, x: number, y: number, maxWidth: number, lineHeight: number) => {
+                    const words = value.split(/\s+/).filter(Boolean);
+                    let line = '';
+                    let currentY = y;
+                    for (const word of words) {
+                        const nextLine = line ? `${line} ${word}` : word;
+                        if (context.measureText(nextLine).width > maxWidth && line) {
+                            context.fillText(line, x, currentY);
+                            currentY += lineHeight;
+                            line = word;
+                        } else {
+                            line = nextLine;
+                        }
+                    }
+                    if (line) context.fillText(line, x, currentY);
+                    return currentY + lineHeight;
+                };
+
+                context.fillStyle = '#292524';
+                context.font = 'italic 22px Georgia, serif';
+                let nextY = drawWrappedText(quote ? `“${quote}”` : '', 72, 610, 650, 32);
+                context.fillStyle = '#92400e';
+                context.font = '600 14px Arial, sans-serif';
+                nextY = drawWrappedText(source.toUpperCase(), 72, nextY + 4, 650, 22);
+                context.fillStyle = '#44403c';
+                context.font = '19px Georgia, serif';
+                drawWrappedText(advice, 58, nextY + 20, 684, 29);
+            };
+
+            try {
+                drawCanvas(true);
+                canvas.toDataURL('image/png');
+            } catch (error) {
+                console.warn('Canvas could not read the illustration; exporting card text with a clean image area.', error);
+                canvas.width = 800;
+                canvas.height = 1100;
+                drawCanvas(false);
+            }
             const imageDataUrl = canvas.toDataURL('image/png');
             const downloadLink = document.createElement('a');
-            downloadLink.download = 'stoic-journal.png';
+            downloadLink.download = `polaroid-${generationId}.png`;
             downloadLink.href = imageDataUrl;
             downloadLink.click();
         } catch (error) {
