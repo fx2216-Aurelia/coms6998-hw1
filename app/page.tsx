@@ -458,22 +458,67 @@ export default function Home() {
             return;
         }
 
+        const fallbackImage =
+            'data:image/svg+xml;charset=utf-8,' +
+            encodeURIComponent(
+                '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="560" viewBox="0 0 800 560"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#e8f4ec"/><stop offset="1" stop-color="#fbf5e7"/></linearGradient></defs><rect width="800" height="560" fill="url(#bg)"/><circle cx="400" cy="245" r="82" fill="#fff" fill-opacity=".65"/><path d="M370 250h60m-30-30v60" stroke="#5f937b" stroke-width="8" stroke-linecap="round"/><text x="400" y="390" text-anchor="middle" fill="#496b57" font-family="serif" font-size="28">A moment of calm</text></svg>',
+            );
+
+        const renderExport = async (useFallbackImages: boolean) => {
+            const wrapper = document.createElement('div');
+            wrapper.style.position = 'fixed';
+            wrapper.style.left = '-10000px';
+            wrapper.style.top = '0';
+            wrapper.style.width = `${card.offsetWidth}px`;
+            wrapper.style.pointerEvents = 'none';
+
+            const exportCard = card.cloneNode(true) as HTMLElement;
+            const images = Array.from(exportCard.querySelectorAll('img'));
+            images.forEach((image, index) => {
+                image.loading = 'eager';
+                image.crossOrigin = 'anonymous';
+                if (useFallbackImages) {
+                    image.src = fallbackImage;
+                    return;
+                }
+                const source = new URL(image.currentSrc || image.src, window.location.href);
+                if (source.origin !== window.location.origin) {
+                    image.src = `/api/proxy-image?url=${encodeURIComponent(source.href)}&cacheBust=${Date.now()}-${index}`;
+                }
+            });
+
+            wrapper.append(exportCard);
+            document.body.append(wrapper);
+            try {
+                await Promise.all(images.map((image) => image.decode()));
+                const canvas = await html2canvas(exportCard, {
+                    useCORS: true,
+                    allowTaint: false,
+                    scale: 2,
+                    backgroundColor: '#FDFBF7',
+                });
+                return canvas.toDataURL('image/png');
+            } finally {
+                wrapper.remove();
+            }
+        };
+
         setDownloadingCard(generationId);
         try {
-            const images = Array.from(card.querySelectorAll('img'));
-            await Promise.all(images.map((image) => image.decode()));
-            const canvas = await html2canvas(card, {
-                useCORS: true,
-                scale: 2,
-                backgroundColor: '#FDFBF7',
-            });
+            let imageDataUrl: string;
+            try {
+                imageDataUrl = await renderExport(false);
+            } catch (error) {
+                console.error('Polaroid export with proxied images failed; retrying clean render:', error);
+                imageDataUrl = await renderExport(true);
+            }
             const downloadLink = document.createElement('a');
             downloadLink.download = 'stoic-journal.png';
-            downloadLink.href = canvas.toDataURL('image/png');
+            downloadLink.href = imageDataUrl;
             downloadLink.click();
         } catch (error) {
             console.error('Could not export journal card:', error);
-            showToast('Could not create the image. Please try again after it loads.');
+            showToast('Could not create the Polaroid just now. Please try again.');
         } finally {
             setDownloadingCard(null);
         }
