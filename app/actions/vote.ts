@@ -5,7 +5,7 @@ import { createClient } from '@/lib/server';
 export async function castVote(generationId: string, voteType: 1 | -1) {
     const supabase = await createClient();
 
-    // 1. 服务端验证登录状态
+    // Verify the signed-in user.
     const {
         data: { user },
         error: authError,
@@ -15,7 +15,7 @@ export async function castVote(generationId: string, voteType: 1 | -1) {
         return { error: 'Please sign in to vote' };
     }
 
-    // 2. 查询当前用户是否已对该卡片投票
+    // Check whether this user already voted on this generation.
     const { data: existingVote, error: fetchError } = await supabase
         .from('votes')
         .select('*')
@@ -27,10 +27,10 @@ export async function castVote(generationId: string, voteType: 1 | -1) {
         return { error: fetchError.message };
     }
 
-    // 3. 执行要求中的投票业务规则
+    // Apply the voting rules.
     if (existingVote) {
         if (existingVote.vote_type === voteType) {
-            // 规则一：点击同一种票 -> DELETE (取消投票)
+            // Clicking the same vote removes it.
             const { error: deleteError } = await supabase
                 .from('votes')
                 .delete()
@@ -39,7 +39,7 @@ export async function castVote(generationId: string, voteType: 1 | -1) {
             if (deleteError) return { error: deleteError.message };
             return { success: true, action: 'unvoted' };
         } else {
-            // 规则二：点击相反的票 -> UPDATE (切换投票类型)
+            // Clicking the opposite vote changes the vote type.
             const { error: updateError } = await supabase
                 .from('votes')
                 .update({ vote_type: voteType })
@@ -49,7 +49,7 @@ export async function castVote(generationId: string, voteType: 1 | -1) {
             return { success: true, action: 'toggled' };
         }
     } else {
-        // 规则三：无历史投票 -> INSERT 新投票记录
+        // Insert a vote when none exists yet.
         const { error: insertError } = await supabase
             .from('votes')
             .insert({

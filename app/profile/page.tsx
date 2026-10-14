@@ -11,12 +11,12 @@ export default function ProfilePage() {
     const [uploading, setUploading] = useState(false);
     const [userId, setUserId] = useState<string | null>(null);
 
-    // 表单状态
+    // Form state.
     const [firstName, setFirstName] = useState('');
     const [lastName, setLastName] = useState('');
     const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
-    // 成功/错误消息提示
+    // Success and error messages.
     const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
     useEffect(() => {
@@ -45,7 +45,7 @@ export default function ProfilePage() {
         loadProfile();
     }, []);
 
-    // 4.5 保存姓名
+    // Save the profile name.
     const handleUpdateName = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!userId) return;
@@ -68,7 +68,7 @@ export default function ProfilePage() {
         }
     };
 
-    // 4.6 上传头像到 avatars bucket 并更新 avatar_url
+    // Upload the avatar and update its public URL.
     const handleAvatarUpload = async (e: ChangeEvent<HTMLInputElement>) => {
         try {
             setUploading(true);
@@ -82,19 +82,19 @@ export default function ProfilePage() {
             const fileExt = file.name.split('.').pop();
             const filePath = `${userId}-${Math.random()}.${fileExt}`;
 
-            // 1. 上传到 avatars bucket
+            // Upload to the avatars bucket.
             const { error: uploadError } = await supabase.storage
                 .from('avatars')
                 .upload(filePath, file, { upsert: true });
 
             if (uploadError) throw uploadError;
 
-            // 2. 获取 public URL
+            // Get the public URL.
             const { data: { publicUrl } } = supabase.storage
                 .from('avatars')
                 .getPublicUrl(filePath);
 
-            // 3. 更新 profiles.avatar_url 字段
+            // Update the profile avatar URL.
             const { error: updateError } = await supabase
                 .from('profiles')
                 .update({ avatar_url: publicUrl })
@@ -137,7 +137,7 @@ export default function ProfilePage() {
                 </div>
             )}
 
-            {/* 4.6 头像预览与上传部分 */}
+            {/* Avatar preview and upload. */}
             <div style={{ marginBottom: '32px', textAlign: 'center' }}>
                 <div style={{ width: '100px', height: '100px', borderRadius: '50%', margin: '0 auto 16px', overflow: 'hidden', border: '2px solid #e5e7eb', backgroundColor: '#f9fafb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     {avatarUrl ? (
@@ -158,7 +158,7 @@ export default function ProfilePage() {
                 </label>
             </div>
 
-            {/* 4.5 姓名编辑表单 */}
+            {/* Name editor. */}
             <form onSubmit={handleUpdateName}>
                 <div style={{ marginBottom: '16px' }}>
                     <label style={{ display: 'block', fontSize: '14px', fontWeight: '500', color: '#374151', marginBottom: '6px' }}>First Name</label>

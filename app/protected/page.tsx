@@ -7,7 +7,7 @@ export default async function ProtectedPage() {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
 
-    // 如果未登录，展示拦截/未授权界面 (Step 4.2)
+    // Show the access-restricted state when the user is signed out.
     if (!user) {
         return (
             <div style={{ padding: '40px', maxWidth: '600px', margin: '60px auto', fontFamily: 'sans-serif', textAlign: 'center', border: '1px solid #e5e7eb', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
@@ -21,7 +21,7 @@ export default async function ProtectedPage() {
         );
     }
 
-    // 4.4：查询数据库 profiles 表，检查 first_name / last_name 是否为 null
+    // Check whether the profile is missing a first or last name.
     const { data: profile } = await supabase
         .from('profiles')
         .select('first_name, last_name')
@@ -32,7 +32,7 @@ export default async function ProtectedPage() {
 
     return (
         <div style={{ padding: '40px', maxWidth: '700px', margin: '40px auto', fontFamily: 'sans-serif' }}>
-            {/* 4.4 Banner 提示：如果名字缺失，显示黄色警告条 */}
+            {/* Show a warning banner when the profile name is incomplete. */}
             {isProfileIncomplete && (
                 <div style={{
                     backgroundColor: '#fffbeb',

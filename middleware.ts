@@ -27,7 +27,7 @@ export async function middleware(request: NextRequest) {
         }
     )
 
-    // 刷新 Session，防止登录状态过期
+    // Refresh the session to prevent the signed-in state from expiring.
     await supabase.auth.getUser()
 
     return supabaseResponse
@@ -36,11 +36,11 @@ export async function middleware(request: NextRequest) {
 export const config = {
     matcher: [
         /*
-         * 匹配所有请求路径，排除：
-         * - _next/static (静态文件)
-         * - _next/image (图片优化文件)
-         * - favicon.ico (网页图标)
-         * - 常见图片格式 (.svg, .png, .jpg, etc.)
+         * Match all request paths except:
+         * - _next/static (static files)
+         * - _next/image (optimized images)
+         * - favicon.ico
+         * - Common image formats (.svg, .png, .jpg, etc.)
          */
         '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
     ],
