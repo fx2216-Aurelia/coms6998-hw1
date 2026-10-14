@@ -1,6 +1,4 @@
-import { createClient } from '@/lib/server';
-
-const ALLOWED_HOSTS = new Set(['image.pollinations.ai', 'images.unsplash.com']);
+const ALLOWED_HOSTS = new Set(['images.unsplash.com']);
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_REDIRECTS = 3;
 const CORS_HEADERS = {
@@ -18,12 +16,14 @@ function proxyError(message: string, status: number): Response {
 function isAllowedImageUrl(value: string): boolean {
     try {
         const url = new URL(value);
+        const isPollinationsHost =
+            url.hostname === 'pollinations.ai' || url.hostname.endsWith('.pollinations.ai');
         return (
             url.protocol === 'https:' &&
             !url.username &&
             !url.password &&
             (url.port === '' || url.port === '443') &&
-            ALLOWED_HOSTS.has(url.hostname)
+            (ALLOWED_HOSTS.has(url.hostname) || isPollinationsHost)
         );
     } catch {
         return false;
@@ -31,16 +31,6 @@ function isAllowedImageUrl(value: string): boolean {
 }
 
 export async function GET(request: Request) {
-    const supabase = await createClient();
-    const {
-        data: { user },
-        error: authError,
-    } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-        return proxyError('Unauthorized', 401);
-    }
-
     const requestUrl = new URL(request.url);
     let targetUrl = requestUrl.searchParams.get('url');
     if (!targetUrl || !isAllowedImageUrl(targetUrl)) {
@@ -96,7 +86,7 @@ export async function GET(request: Request) {
                 ...CORS_HEADERS,
                 'Content-Type': contentType,
                 'Content-Length': String(image.byteLength),
-                'Cache-Control': 'private, max-age=300',
+                'Cache-Control': 'public, max-age=86400',
             },
         });
     } catch (error) {

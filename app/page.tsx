@@ -487,8 +487,14 @@ export default function Home() {
         }
 
         setDownloadingCard(generationId);
-        const images = Array.from(card.querySelectorAll('img'));
-        const originalSources = images.map((image) => image.getAttribute('src'));
+        const wrapper = document.createElement('div');
+        wrapper.style.position = 'fixed';
+        wrapper.style.left = '-10000px';
+        wrapper.style.top = '0';
+        wrapper.style.width = `${card.offsetWidth}px`;
+        wrapper.style.pointerEvents = 'none';
+        const exportCard = card.cloneNode(true) as HTMLElement;
+        const images = Array.from(exportCard.querySelectorAll('img'));
         try {
             await Promise.all(images.map(async (image) => {
                 const source = image.currentSrc || image.src;
@@ -501,7 +507,9 @@ export default function Home() {
                 }
             }));
 
-            const canvas = await html2canvas(card, {
+            wrapper.append(exportCard);
+            document.body.append(wrapper);
+            const canvas = await html2canvas(exportCard, {
                 useCORS: true,
                 allowTaint: false,
                 scale: 2,
@@ -516,10 +524,7 @@ export default function Home() {
             console.error('Could not export journal card:', error);
             showToast('Could not prepare the original illustration for download. Please try again.');
         } finally {
-            images.forEach((image, index) => {
-                const originalSource = originalSources[index];
-                if (originalSource) image.src = originalSource;
-            });
+            wrapper.remove();
             setDownloadingCard(null);
         }
     };
