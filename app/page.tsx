@@ -195,6 +195,34 @@ async function preloadImage(src: string, situation: string): Promise<string> {
     return fallback;
 }
 
+async function imageUrlToDataUrl(imageUrl: string): Promise<string> {
+    if (imageUrl.startsWith('data:')) return imageUrl;
+
+    const sourceUrl = new URL(imageUrl, window.location.href);
+    const fetchUrl =
+        sourceUrl.origin === window.location.origin
+            ? sourceUrl.href
+            : `/api/proxy-image?url=${encodeURIComponent(sourceUrl.href)}&cacheBust=${Date.now()}`;
+    const response = await fetch(fetchUrl, { credentials: 'same-origin', cache: 'no-store' });
+    if (!response.ok) {
+        throw new Error(`Could not load the card illustration for export (${response.status}).`);
+    }
+
+    const blob = await response.blob();
+    if (!blob.type.startsWith('image/')) {
+        throw new Error('The card illustration proxy returned a non-image response.');
+    }
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+            if (typeof reader.result === 'string') resolve(reader.result);
+            else reject(new Error('Could not convert the card illustration for export.'));
+        };
+        reader.onerror = () => reject(reader.error || new Error('Could not read the card illustration.'));
+        reader.readAsDataURL(blob);
+    });
+}
+
 function PostImage({
     src,
     situation,
@@ -458,126 +486,40 @@ export default function Home() {
             return;
         }
 
-        const fallbackImage =
-            'data:image/svg+xml;charset=utf-8,' +
-            encodeURIComponent(
-                '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="560" viewBox="0 0 800 560"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#e8f4ec"/><stop offset="1" stop-color="#fbf5e7"/></linearGradient></defs><rect width="800" height="560" fill="url(#bg)"/><circle cx="400" cy="245" r="82" fill="#fff" fill-opacity=".65"/><path d="M370 250h60m-30-30v60" stroke="#5f937b" stroke-width="8" stroke-linecap="round"/><text x="400" y="390" text-anchor="middle" fill="#496b57" font-family="serif" font-size="28">A moment of calm</text></svg>',
-            );
-
-        const renderExport = async (useFallbackImages: boolean) => {
-            const wrapper = document.createElement('div');
-            wrapper.style.position = 'fixed';
-            wrapper.style.left = '-10000px';
-            wrapper.style.top = '0';
-            wrapper.style.width = `${card.offsetWidth}px`;
-            wrapper.style.pointerEvents = 'none';
-
-            const exportCard = card.cloneNode(true) as HTMLElement;
-            const images = Array.from(exportCard.querySelectorAll('img'));
-            images.forEach((image, index) => {
-                image.loading = 'eager';
-                image.crossOrigin = 'anonymous';
-                if (useFallbackImages) {
-                    image.src = fallbackImage;
-                    return;
-                }
-                const source = new URL(image.currentSrc || image.src, window.location.href);
-                if (source.origin !== window.location.origin) {
-                    image.src = `/api/proxy-image?url=${encodeURIComponent(source.href)}&cacheBust=${Date.now()}-${index}`;
-                }
-            });
-
-            wrapper.append(exportCard);
-            document.body.append(wrapper);
-            try {
-                await Promise.all(images.map((image) => image.decode()));
-                const canvas = await html2canvas(exportCard, {
-                    useCORS: true,
-                    allowTaint: false,
-                    scale: 2,
-                    backgroundColor: '#FDFBF7',
-                });
-                return canvas.toDataURL('image/png');
-            } finally {
-                wrapper.remove();
-            }
-        };
-
-        const renderCanvasFallback = () => {
-            const canvas = document.createElement('canvas');
-            canvas.width = 900;
-            canvas.height = 1200;
-            const context = canvas.getContext('2d');
-            if (!context) throw new Error('Canvas is unavailable in this browser.');
-
-            context.fillStyle = '#fdfbf7';
-            context.fillRect(0, 0, canvas.width, canvas.height);
-            const scene = context.createLinearGradient(0, 0, 900, 560);
-            scene.addColorStop(0, '#e8f4ec');
-            scene.addColorStop(1, '#fbf5e7');
-            context.fillStyle = scene;
-            context.fillRect(0, 0, 900, 560);
-            context.fillStyle = 'rgba(255, 255, 255, 0.65)';
-            context.beginPath();
-            context.arc(690, 145, 82, 0, Math.PI * 2);
-            context.fill();
-            context.fillStyle = '#b7d0b8';
-            context.beginPath();
-            context.ellipse(280, 510, 420, 115, 0, Math.PI, Math.PI * 2);
-            context.ellipse(730, 535, 360, 130, 0, Math.PI, Math.PI * 2);
-            context.fill();
-
-            const lines = (card.innerText || '')
-                .split('\n')
-                .map((line) => line.trim())
-                .filter((line) => line && !/download polaroid|preparing image/i.test(line));
-            context.fillStyle = '#292524';
-            context.font = '26px Georgia, serif';
-            let y = 620;
-            for (const line of lines) {
-                const words = line.split(/\s+/);
-                let currentLine = '';
-                for (const word of words) {
-                    const candidate = currentLine ? `${currentLine} ${word}` : word;
-                    if (context.measureText(candidate).width > 800 && currentLine) {
-                        context.fillText(currentLine, 52, y);
-                        y += 38;
-                        currentLine = word;
-                    } else {
-                        currentLine = candidate;
-                    }
-                }
-                if (currentLine && y < 1150) {
-                    context.fillText(currentLine, 52, y);
-                    y += 48;
-                }
-                if (y >= 1150) break;
-            }
-            return canvas.toDataURL('image/png');
-        };
-
         setDownloadingCard(generationId);
+        const images = Array.from(card.querySelectorAll('img'));
+        const originalSources = images.map((image) => image.getAttribute('src'));
         try {
-            let imageDataUrl: string;
-            try {
-                imageDataUrl = await renderExport(false);
-            } catch (error) {
-                console.error('Polaroid export with proxied images failed; retrying clean render:', error);
-                try {
-                    imageDataUrl = await renderExport(true);
-                } catch (fallbackError) {
-                    console.error('Clean Polaroid render failed; creating a canvas-safe export:', fallbackError);
-                    imageDataUrl = renderCanvasFallback();
+            await Promise.all(images.map(async (image) => {
+                const source = image.currentSrc || image.src;
+                image.crossOrigin = 'anonymous';
+                image.loading = 'eager';
+                image.src = await imageUrlToDataUrl(source);
+                await image.decode();
+                if (image.naturalWidth === 0 || image.naturalHeight === 0) {
+                    throw new Error('The card illustration did not finish loading.');
                 }
-            }
+            }));
+
+            const canvas = await html2canvas(card, {
+                useCORS: true,
+                allowTaint: false,
+                scale: 2,
+                backgroundColor: '#FDFBF7',
+            });
+            const imageDataUrl = canvas.toDataURL('image/png');
             const downloadLink = document.createElement('a');
             downloadLink.download = 'stoic-journal.png';
             downloadLink.href = imageDataUrl;
             downloadLink.click();
         } catch (error) {
             console.error('Could not export journal card:', error);
-            showToast('Could not create the Polaroid just now. Please try again.');
+            showToast('Could not prepare the original illustration for download. Please try again.');
         } finally {
+            images.forEach((image, index) => {
+                const originalSource = originalSources[index];
+                if (originalSource) image.src = originalSource;
+            });
             setDownloadingCard(null);
         }
     };
