@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { createClient } from '@/lib/server';
 
+export const maxDuration = 60;
+
 type GeneratedContent = {
     quote: {
         text: string;
@@ -74,6 +76,36 @@ function extractVisualKeywords(prompt: string): string {
     }
 
     return 'warm mug campus window peaceful pause';
+}
+
+async function fetchImageAsDataUrl(imageUrl: string): Promise<string> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 55_000);
+
+    try {
+        const response = await fetch(imageUrl, {
+            signal: controller.signal,
+            cache: 'no-store',
+            headers: { Accept: 'image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8' },
+        });
+        if (!response.ok) {
+            throw new Error(`Image provider returned ${response.status}.`);
+        }
+
+        const contentType = response.headers.get('content-type')?.split(';', 1)[0].trim() ?? '';
+        if (!['image/avif', 'image/jpeg', 'image/png', 'image/webp'].includes(contentType)) {
+            throw new Error(`Image provider returned unsupported content type: ${contentType || 'unknown'}.`);
+        }
+
+        const imageBuffer = Buffer.from(await response.arrayBuffer());
+        if (imageBuffer.byteLength === 0 || imageBuffer.byteLength > 10 * 1024 * 1024) {
+            throw new Error('Generated image was empty or exceeded the 10 MB limit.');
+        }
+
+        return `data:${contentType};base64,${imageBuffer.toString('base64')}`;
+    } finally {
+        clearTimeout(timeout);
+    }
 }
 
 function normalizeGeneratedContent(value: unknown): GeneratedContent | null {
@@ -329,6 +361,7 @@ ${JSON.stringify({ location: typeof location === 'string' ? location.trim() : 'N
         );
         const randomSeed = Math.floor(Math.random() * 999_999);
         const imageUrl = `https://image.pollinations.ai/prompt/${cleanPrompt}?width=800&height=500&nologo=true&seed=${randomSeed}&model=flux`;
+        const base64Image = await fetchImageAsDataUrl(imageUrl);
         const savedOutput = JSON.stringify({
             analysis: content.analysis,
             actions: content.actions,
@@ -372,8 +405,9 @@ ${JSON.stringify({ location: typeof location === 'string' ? location.trim() : 'N
             ...generation,
             id: insertedGeneration.id,
             image_prompt: imagePrompt,
-            image_url: imageUrl,
-            imageUrl,
+            image_url: base64Image,
+            imageUrl: base64Image,
+            base64Image,
         });
     } catch (error) {
         console.error("DEBUG Gemini error details:", error);

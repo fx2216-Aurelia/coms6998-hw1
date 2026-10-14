@@ -23,6 +23,7 @@ interface Generation {
     image_prompt?: string;
     image_url?: string;
     imageUrl?: string;
+    base64Image?: string;
     imagePreloaded?: boolean;
     created_at: string;
     hug_count?: number | null;
@@ -159,105 +160,50 @@ function toFeedPost(generation: Generation, seed?: number): FeedPost {
     };
 }
 
-function getContextualFallbackImage(situation: string): string {
-    const topic = situation.toLowerCase();
-    if (/coffee|cafe|café|latte|barista/.test(topic)) {
-        return 'https://images.unsplash.com/photo-1501339847302-ac426a4a7cbb?w=800&auto=format&fit=crop&q=80';
-    }
-    if (/study|work|library|exam|paper|assignment|intern|job|career|interview/.test(topic)) {
-        return 'https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?w=800&auto=format&fit=crop&q=80';
-    }
-    if (/walk|rain|city|commute|outside|weather/.test(topic)) {
-        return 'https://images.unsplash.com/photo-1519681393784-d120267933ba?w=800&auto=format&fit=crop&q=80';
-    }
-    return 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800&auto=format&fit=crop&q=80';
-}
-
-function loadImage(src: string): Promise<boolean> {
-    return new Promise((resolve) => {
+function preloadImage(src: string): Promise<string> {
+    return new Promise((resolve, reject) => {
         const image = new Image();
-        const timeout = window.setTimeout(() => resolve(false), 20_000);
+        const timeout = window.setTimeout(() => reject(new Error('Generated illustration did not finish loading.')), 30_000);
         const finish = (loaded: boolean) => {
             window.clearTimeout(timeout);
-            resolve(loaded);
+            if (loaded) resolve(src);
+            else reject(new Error('Generated illustration could not be loaded.'));
         };
-        image.crossOrigin = 'anonymous';
         image.onload = () => finish(true);
         image.onerror = () => finish(false);
         image.src = src;
     });
 }
 
-async function preloadImage(src: string, situation: string): Promise<string> {
-    if (src && await loadImage(src)) return src;
-    const fallback = getContextualFallbackImage(situation);
-    await loadImage(fallback);
-    return fallback;
-}
-
-async function imageUrlToDataUrl(imageUrl: string): Promise<string> {
-    if (imageUrl.startsWith('data:')) return imageUrl;
-
-    const sourceUrl = new URL(imageUrl, window.location.href);
-    const fetchUrl =
-        sourceUrl.origin === window.location.origin
-            ? sourceUrl.href
-            : `/api/proxy-image?url=${encodeURIComponent(sourceUrl.href)}&cacheBust=${Date.now()}`;
-    const response = await fetch(fetchUrl, { credentials: 'same-origin', cache: 'no-store' });
-    if (!response.ok) {
-        throw new Error(`Could not load the card illustration for export (${response.status}).`);
+function getRenderedImageSrc(src: string): string {
+    if (src.startsWith('data:image/')) return src;
+    try {
+        const url = new URL(src);
+        if (url.hostname === 'image.pollinations.ai' || url.hostname === 'images.unsplash.com') {
+            return `/api/proxy-image?url=${encodeURIComponent(url.href)}`;
+        }
+    } catch {
+        return src;
     }
-
-    const blob = await response.blob();
-    if (!blob.type.startsWith('image/')) {
-        throw new Error('The card illustration proxy returned a non-image response.');
-    }
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-            if (typeof reader.result === 'string') resolve(reader.result);
-            else reject(new Error('Could not convert the card illustration for export.'));
-        };
-        reader.onerror = () => reject(reader.error || new Error('Could not read the card illustration.'));
-        reader.readAsDataURL(blob);
-    });
+    return src;
 }
 
 function PostImage({
     src,
-    situation,
-    imagePrompt,
     preloaded = false,
     alt,
 }: {
     src: string;
-    situation: string;
-    imagePrompt?: string;
     preloaded?: boolean;
     alt: string;
 }) {
     const [loaded, setLoaded] = useState(preloaded);
-    const [activeSrc, setActiveSrc] = useState(src);
-    const [retryStage, setRetryStage] = useState(0);
+    const renderedSrc = getRenderedImageSrc(src);
     const [unavailable, setUnavailable] = useState(false);
     const hasImageUrl = Boolean(src.trim());
 
     const handleError = () => {
-        if (retryStage === 0) {
-            setActiveSrc(
-                createPostImageUrl(
-                    imagePrompt || situation,
-                    `${src}-retry`,
-                    Date.now(),
-                ),
-            );
-            setRetryStage(1);
-        } else if (retryStage === 1) {
-            setActiveSrc(getContextualFallbackImage(situation));
-            setRetryStage(2);
-        } else {
-            setUnavailable(true);
-        }
+        setUnavailable(true);
         setLoaded(false);
     };
 
@@ -268,7 +214,7 @@ function PostImage({
             )}
             {hasImageUrl && !unavailable ? (
                 <img
-                    src={activeSrc}
+                    src={renderedSrc}
                     alt={alt || 'Stoic reflection illustration'}
                     crossOrigin="anonymous"
                     onLoad={() => {
@@ -443,19 +389,25 @@ export default function Home() {
 
             const generated: Generation = await response.json();
             const normalizedPost = toFeedPost(generated, Date.now());
+            const generatedImage = generated.base64Image || generated.imageUrl;
+            if (!generatedImage?.startsWith('data:image/')) {
+                throw new Error('The generation response did not include an embedded illustration.');
+            }
             const imageUrl = await Promise.all([
-                preloadImage(generated.imageUrl || normalizedPost.imageUrl, generated.prompt),
+                preloadImage(generatedImage),
                 minimumLoadingTime,
             ]).then(([loadedImageUrl]) => loadedImageUrl);
             const newPost: FeedPost = {
                 ...normalizedPost,
                 imageUrl,
+                base64Image: imageUrl,
                 imagePreloaded: true,
             };
             setLatestReflection({
                 ...generated,
                 imageUrl: newPost.imageUrl,
                 image_url: newPost.imageUrl,
+                base64Image: imageUrl,
                 image_prompt: newPost.imagePrompt,
                 imagePreloaded: true,
             });
@@ -487,29 +439,17 @@ export default function Home() {
         }
 
         setDownloadingCard(generationId);
-        const wrapper = document.createElement('div');
-        wrapper.style.position = 'fixed';
-        wrapper.style.left = '-10000px';
-        wrapper.style.top = '0';
-        wrapper.style.width = `${card.offsetWidth}px`;
-        wrapper.style.pointerEvents = 'none';
-        const exportCard = card.cloneNode(true) as HTMLElement;
-        const images = Array.from(exportCard.querySelectorAll('img'));
         try {
+            const images = Array.from(card.querySelectorAll('img'));
             await Promise.all(images.map(async (image) => {
-                const source = image.currentSrc || image.src;
-                image.crossOrigin = 'anonymous';
                 image.loading = 'eager';
-                image.src = await imageUrlToDataUrl(source);
                 await image.decode();
                 if (image.naturalWidth === 0 || image.naturalHeight === 0) {
                     throw new Error('The card illustration did not finish loading.');
                 }
             }));
 
-            wrapper.append(exportCard);
-            document.body.append(wrapper);
-            const canvas = await html2canvas(exportCard, {
+            const canvas = await html2canvas(card, {
                 useCORS: true,
                 allowTaint: false,
                 scale: 2,
@@ -522,9 +462,8 @@ export default function Home() {
             downloadLink.click();
         } catch (error) {
             console.error('Could not export journal card:', error);
-            showToast('Could not prepare the original illustration for download. Please try again.');
+            showToast('Could not download the Polaroid. Please try again.');
         } finally {
-            wrapper.remove();
             setDownloadingCard(null);
         }
     };
@@ -1022,13 +961,7 @@ export default function Home() {
                                                     new Date(latestReflection.created_at).getTime(),
                                                 )
                                             }
-                                            situation={latestReflection.prompt}
                                             preloaded={latestReflection.imagePreloaded}
-                                            imagePrompt={
-                                                latestReflection.image_prompt ||
-                                                content.image_prompt ||
-                                                latestReflection.prompt
-                                            }
                                             alt={latestReflection.stoic_quote || 'Reflection illustration'}
                                         />
                                     </div>
@@ -1252,8 +1185,6 @@ export default function Home() {
                                                 <PostImage
                                                     key={`${post.id}:${post.imageUrl}`}
                                                     src={post.imageUrl}
-                                                    situation={post.prompt}
-                                                    imagePrompt={post.imagePrompt}
                                                     preloaded={post.imagePreloaded}
                                                     alt={post.stoic_quote || 'Reflection illustration'}
                                                 />
