@@ -10,14 +10,19 @@ type GeneratedContent = {
         source: string;
     };
     analysis: string;
-    actions: {
-        meditation: string;
-        walk: string;
-        nearby_anchor: string;
+    coping_modality: string;
+    coping_action: {
+        step1: string;
+        step2: string;
     };
     scene_theme: string;
     image_prompt: string;
 };
+
+function createFallbackImageDataUrl(): string {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="500" viewBox="0 0 800 500"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#e8f4ec"/><stop offset=".55" stop-color="#f7f4e9"/><stop offset="1" stop-color="#dcebe2"/></linearGradient><radialGradient id="glow"><stop stop-color="#fff5d7" stop-opacity=".9"/><stop offset="1" stop-color="#fff5d7" stop-opacity="0"/></radialGradient></defs><rect width="800" height="500" rx="28" fill="url(#bg)"/><circle cx="400" cy="210" r="190" fill="url(#glow)"/><path d="M0 385q160-75 320 0t320 0 160-5v120H0Z" fill="#a8d5ba"/><path d="M0 430q170-55 340 0t340 0 120-5v75H0Z" fill="#86c8a0"/><circle cx="400" cy="210" r="48" fill="#f2c96d" opacity=".8"/><path d="M400 290c-42-34-72-64-47-91 19-18 41-7 47 12 6-19 28-30 47-12 25 27-5 57-47 91Z" fill="#ffb6c1" opacity=".88"/><path d="M400 318c-43-16-72-14-105 6 32 1 57 12 76 28 12-22 21-34 29-34Zm0 0c43-16 72-14 105 6-32 1-57 12-76 28-12-22-21-34-29-34Z" fill="#75ad8b"/></svg>`;
+    return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
 
 function createFallbackContent(
     prompt: string,
@@ -36,15 +41,37 @@ function createFallbackContent(
         toneType === 'roast'
             ? `You’re stressed about “${worry}.” The outcome isn’t taking requests, but your next move is yours: pick one useful action and stop rehearsing the rest.`
             : `You’re carrying “${worry},” and it makes sense that it feels heavy. You cannot command every outcome, but you can choose one kind, useful next step and release what is not yours to control.`;
+    const modalityOptions = /exam|test|midterm|final|study|cram|library|desk/i.test(`${prompt} ${place}`)
+        ? [
+              ['Progressive Muscle Relaxation', 'Unclench your jaw and lower your shoulders.', 'Roll each shoulder back twice, then place both feet flat before opening the next page.'],
+              ['Micro-Behavioral Activation', 'Clear one small square of desk.', 'Put only the next page and one pen in that space, then start with its first question.'],
+              ['Sensory/Grounding Anchor', 'Rest your fingertips on the desk edge.', 'Notice its temperature and texture, then point to the exact line you will work on next.'],
+          ]
+        : /commute|train|bus|subway|crowd|noise/i.test(`${prompt} ${place}`)
+            ? [
+                  ['Sensory/Grounding Anchor', 'Plant both feet and hold the rail lightly.', 'Look through the train window and silently name three round objects you can see.'],
+                  ['Progressive Muscle Relaxation', 'Lower your shoulders and loosen your hands.', 'Press your feet into the floor for five seconds, release, then repeat once.'],
+                  ['Micro-Behavioral Activation', 'Set both feet comfortably on the floor.', 'Choose one small task for when you arrive and type it into your notes now.'],
+              ]
+            : /friend|roommate|lonely|relationship|social|argument/i.test(prompt)
+                ? [
+                      ['Compassionate Validating Metaphor', 'Put both feet on the floor and relax your jaw.', 'Write one kind sentence you would say to a friend in this situation; keep it where you can reread it.'],
+                      ['Cognitive Reframing', 'Write down what you know happened, without guessing intent.', 'Under it, note one thing you can choose before replying, then wait until you feel ready.'],
+                      ['Micro-Behavioral Activation', 'Turn your phone face down for one minute.', 'Draft one clear sentence about what you need; save it without sending yet.'],
+                  ]
+                : [
+                      ['Cognitive Reframing', 'Write one part of this situation you can influence.', 'Choose a single next action for that part and set aside the rest for now.'],
+                      ['Sensory/Grounding Anchor', 'Place both feet on the floor and press gently.', 'Name two colors you see, then touch one nearby surface and notice its texture.'],
+                      ['Micro-Behavioral Activation', 'Fill a mug or glass with a drink.', 'Set it beside you, take one sip, and clear the space for the task you chose.'],
+                  ];
+    const [coping_modality, step1, step2] =
+        modalityOptions[Math.floor(Math.random() * modalityOptions.length)];
 
     return {
         quote,
         analysis,
-        actions: {
-            meditation: 'Breathe slowly for one minute.',
-            walk: `Take a quiet three-minute walk near ${place}.`.split(/\s+/).slice(0, 7).join(' '),
-            nearby_anchor: 'Notice one steady thing nearby.',
-        },
+        coping_modality,
+        coping_action: { step1, step2 },
         scene_theme: /park|walk|tree|river|outside/i.test(`${prompt} ${place}`)
             ? 'nature'
             : /exam|study|library|paper|class/i.test(prompt)
@@ -114,11 +141,22 @@ function normalizeGeneratedContent(value: unknown): GeneratedContent | null {
         value === null ||
         !('quote' in value) ||
         !('analysis' in value) ||
-        !('actions' in value) ||
+        !('coping_modality' in value) ||
+        !('coping_action' in value) ||
         !('scene_theme' in value) ||
         !('image_prompt' in value) ||
         typeof value.analysis !== 'string' ||
         !value.analysis.trim() ||
+        typeof value.coping_modality !== 'string' ||
+        !value.coping_modality.trim() ||
+        typeof value.coping_action !== 'object' ||
+        value.coping_action === null ||
+        !('step1' in value.coping_action) ||
+        !('step2' in value.coping_action) ||
+        typeof value.coping_action.step1 !== 'string' ||
+        !value.coping_action.step1.trim() ||
+        typeof value.coping_action.step2 !== 'string' ||
+        !value.coping_action.step2.trim() ||
         typeof value.image_prompt !== 'string' ||
         !value.image_prompt.trim()
     ) {
@@ -133,22 +171,10 @@ function normalizeGeneratedContent(value: unknown): GeneratedContent | null {
                 typeof value.quote.text === 'string' && typeof value.quote.source === 'string'
                 ? { text: value.quote.text.trim(), source: value.quote.source.trim() }
                 : null;
-    const actions = value.actions;
 
     if (
         !quote?.text ||
         !quote.source ||
-        typeof actions !== 'object' ||
-        actions === null ||
-        !('meditation' in actions) ||
-        !('walk' in actions) ||
-        !('nearby_anchor' in actions) ||
-        typeof actions.meditation !== 'string' ||
-        typeof actions.walk !== 'string' ||
-        typeof actions.nearby_anchor !== 'string' ||
-        !actions.meditation.trim() ||
-        !actions.walk.trim() ||
-        !actions.nearby_anchor.trim() ||
         typeof value.scene_theme !== 'string' ||
         !value.scene_theme.trim()
     ) {
@@ -157,15 +183,14 @@ function normalizeGeneratedContent(value: unknown): GeneratedContent | null {
 
     const sentences = value.analysis.match(/[^.!?]+(?:[.!?]+|$)/g)?.map((sentence) => sentence.trim()).filter(Boolean) ?? [];
     const conciseAnalysis = sentences.slice(0, 2).join(' ').split(/\s+/).slice(0, 30).join(' ');
-    const limitAction = (action: string) => action.trim().split(/\s+/).slice(0, 7).join(' ');
 
     return {
         quote,
         analysis: conciseAnalysis,
-        actions: {
-            meditation: limitAction(actions.meditation),
-            walk: limitAction(actions.walk),
-            nearby_anchor: limitAction(actions.nearby_anchor),
+        coping_modality: value.coping_modality.trim(),
+        coping_action: {
+            step1: value.coping_action.step1.trim().split(/\s+/).slice(0, 18).join(' '),
+            step2: value.coping_action.step2.trim().split(/\s+/).slice(0, 22).join(' '),
         },
         scene_theme: value.scene_theme.trim().toLowerCase().replace(/[^a-z0-9-]/g, ''),
         image_prompt: value.image_prompt.trim(),
@@ -208,21 +233,17 @@ function parseGeneratedContent(text: string): GeneratedContent | null {
 
     const quote = extractStringField('quote');
     const analysis = extractStringField('analysis');
-    const meditation = extractStringField('meditation');
-    const walk = extractStringField('walk');
-    const nearbyAnchor = extractStringField('nearby_anchor');
+    const copingModality = extractStringField('coping_modality');
+    const copingAction = extractStringField('coping_action');
     const sceneTheme = extractStringField('scene_theme');
     const imagePrompt = extractStringField('image_prompt');
 
-    return quote && analysis && meditation && walk && nearbyAnchor && sceneTheme && imagePrompt
+    return quote && analysis && copingModality && copingAction && sceneTheme && imagePrompt
         ? normalizeGeneratedContent({
               quote,
               analysis,
-              actions: {
-                  meditation,
-                  walk,
-                  nearby_anchor: nearbyAnchor,
-              },
+              coping_modality: copingModality,
+              coping_action: copingAction,
               scene_theme: sceneTheme,
               image_prompt: imagePrompt,
           })
@@ -290,19 +311,31 @@ export async function POST(req: Request) {
 
         const toneInstructions =
             toneType === 'gentle'
-                ? `Use an empathetic, philosophical, grounding tone.`
-                : `Use witty, dry-humored, good-natured Stoic tough love tailored to NYC/Columbia life.`;
-        const personaPrompt = `You are a modern Stoic counselor inspired by Marcus Aurelius's Meditations. The user's stress level is ${stressLevel} out of 10.
+                ? `Use a warm, empathetic, philosophical tone that grounds the user without judging them.`
+                : `Use witty, dry-humored, good-natured Stoic tough love tailored to NYC/Columbia life, while remaining supportive and never shaming.`;
+        const personaPrompt = `You are a warm, modern Stoic companion inspired by Marcus Aurelius's Meditations, speaking like a supportive friend rather than a clinical therapist. The user's stress level is ${stressLevel} out of 10.
 
 ${toneInstructions}
 
+Read the specific situation carefully before responding. Tailor every sentence and suggestion to its concrete setting and context (for example: indoor studying, late-night cramming, exam panic, commuting, social burnout, or a difficult conversation). Be concise, emotionally attuned, and original; avoid generic self-help language and clichés.
+
+For "coping_modality" and "coping_action", choose exactly ONE distinct modality that best fits this particular situation from this list:
+1. Cognitive Reframing: a specific Stoic perspective or a useful distinction between what is and is not controllable.
+2. Sensory/Grounding Anchor: a tactile, visual, or auditory detail or small shift in the user's immediate soundscape.
+3. Progressive Muscle Relaxation: one discreet, context-appropriate micro-stretch or release for the jaw, shoulders, hands, or another tense area.
+4. Micro-Behavioral Activation: one tiny concrete action involving a doodle, warm-drink ritual, or small environmental nudge.
+5. Compassionate Validating Metaphor: a gentle, brief image or story that validates the feeling without minimizing it.
+Do not list multiple modalities or give multiple competing options. Match the action to the user's actual environment and make it feasible now.
+
+Strict anti-cliché rules: Do NOT default to breathing exercises, meditation timers, or taking a short walk. Never recommend "1-minute deep breathing", "3-minute walk", or "notice one thing nearby" as a stock response. Only mention one of these if the user's particular context makes it genuinely specific and unusually fitting; prefer a fresh, concrete alternative.
+
+The selected modality only describes the approach. The action itself must ALWAYS be practical and immediately actionable, even when the selected modality is Compassionate Validating Metaphor. Do not put a metaphor, reassurance, reflection prompt, or abstract instruction in the action box. Give exactly two short, sequential steps that use the user's actual surroundings or body and can be started right now. Each step must describe a visible physical or tactical action (for example, "Lower your shoulders and loosen your grip on the rail" followed by "Name three round objects outside the train window"). Avoid asking the user to interpret feelings or imagine a story.
+
 Return only a valid JSON object with exactly these fields:
-- "analysis": strictly one or two very short, punchy sentences, no more than 30 words total, reframing the situation with Stoic wisdom and distinguishing what the user can control.
+- "analysis": one or two concise, warm sentences (no more than 30 words total), reflecting the specific situation with a Stoic perspective and distinguishing what the user can control.
 - "quote": an authentic, relevant quote from Meditations as an object with string fields "text" and "source" (include the book/section when known).
-- "actions": an object with three concise, practical prescriptions tailored to the user's location and activity:
-  - "meditation": one short imperative phrase of fewer than 8 words, a one-minute breathing or grounding technique suitable for the setting.
-  - "walk": one short imperative phrase of fewer than 8 words, a specific place to step away or take a three-minute stroll.
-  - "nearby_anchor": one short imperative phrase of fewer than 8 words, using a tangible item nearby to de-stress.
+- "coping_modality": the exact name of the single selected modality from the five above.
+- "coping_action": an object with exactly "step1" and "step2", each a direct imperative step tailored to the user's specific context; each step must be concrete and immediately doable, with no poetic metaphor or vague advice.
 - "scene_theme": one visual keyword, preferably one of desk, night, coffee, nature, or city.
 - "image_prompt": create a custom, highly relevant, cute and heartwarming cozy cartoon illustration prompt based directly on the user's specific worry, location, and mood. Describe a Columbia lion cub acting out that exact situation (for example, studying late in Butler Library with big textbooks and a warm mug, or walking beneath autumn trees in Riverside Park). Include expressive storytelling details, cozy pastel colors, soft warm lighting, a charming diary-card composition, and a softly sculpted clay-like texture. Use original visual details; no text or watermark and do not reference or imitate any specific studio, artist, or copyrighted character.
 
@@ -322,7 +355,7 @@ ${JSON.stringify({ location: typeof location === 'string' ? location.trim() : 'N
                 try {
                     const model = genAI.getGenerativeModel({
                         model: candidate,
-                        generationConfig: { responseMimeType: 'application/json' },
+                        generationConfig: { responseMimeType: 'application/json', temperature: 0.75 },
                     });
                     const result = await model.generateContent(personaPrompt);
                     content = parseGeneratedContent(result.response.text());
@@ -360,14 +393,30 @@ ${JSON.stringify({ location: typeof location === 'string' ? location.trim() : 'N
             visualPrompt,
         );
         const randomSeed = Math.floor(Math.random() * 999_999);
-        const imageUrl = `https://image.pollinations.ai/prompt/${cleanPrompt}?width=800&height=500&nologo=true&seed=${randomSeed}&model=flux`;
-        const base64Image = await fetchImageAsDataUrl(imageUrl);
+        const providerImageUrl = `https://image.pollinations.ai/prompt/${cleanPrompt}?width=800&height=500&nologo=true&seed=${randomSeed}&model=flux`;
+        let imageUrl: string;
+        let base64Image: string;
+        let imageFallback = false;
+        try {
+            base64Image = await fetchImageAsDataUrl(providerImageUrl);
+            imageUrl = providerImageUrl;
+        } catch (error) {
+            imageFallback = true;
+            imageUrl = createFallbackImageDataUrl();
+            base64Image = imageUrl;
+            console.warn(
+                'Illustration provider failed; continuing with the local placeholder.',
+                error,
+            );
+        }
         const savedOutput = JSON.stringify({
             analysis: content.analysis,
-            actions: content.actions,
+            coping_modality: content.coping_modality,
+            coping_action: content.coping_action,
             scene_theme: content.scene_theme,
             image_prompt: imagePrompt,
-            image_url: imageUrl,
+            image_url: imageFallback ? imageUrl : providerImageUrl,
+            image_fallback: imageFallback,
             location: typeof location === 'string' ? location.trim() : 'Morningside',
             author_name: authorName,
         });
@@ -408,6 +457,7 @@ ${JSON.stringify({ location: typeof location === 'string' ? location.trim() : 'N
             image_url: base64Image,
             imageUrl: base64Image,
             base64Image,
+            image_fallback: imageFallback,
         });
     } catch (error) {
         console.error("DEBUG Gemini error details:", error);

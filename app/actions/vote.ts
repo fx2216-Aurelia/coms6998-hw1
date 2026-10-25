@@ -2,63 +2,75 @@
 
 import { createClient } from '@/lib/server';
 
-export async function castVote(generationId: string, voteType: 1 | -1) {
+type VoteType = 'hug' | 'coffee';
+type VoteError = {
+    message: string;
+    code?: string;
+    details?: string;
+    hint?: string;
+};
+
+function formatVoteError(error: {
+    message: string;
+    code?: string;
+    details?: string;
+    hint?: string;
+}): VoteError {
+    return {
+        message: error.message,
+        ...(error.code ? { code: error.code } : {}),
+        ...(error.details ? { details: error.details } : {}),
+        ...(error.hint ? { hint: error.hint } : {}),
+    };
+}
+
+export async function castVote(generationId: string, voteType: VoteType) {
     const supabase = await createClient();
 
-    // Verify the signed-in user.
     const {
         data: { user },
         error: authError,
     } = await supabase.auth.getUser();
 
     if (!user || authError) {
-        return { error: 'Please sign in to vote' };
+        return {
+            success: false as const,
+            error: { message: authError?.message ?? 'Please sign in to vote' },
+        };
     }
 
-    // Check whether this user already voted on this generation.
     const { data: existingVote, error: fetchError } = await supabase
         .from('votes')
-        .select('*')
+        .select('generation_id')
         .eq('generation_id', generationId)
         .eq('user_id', user.id)
+        .eq('vote_type', voteType)
         .maybeSingle();
 
     if (fetchError) {
-        return { error: fetchError.message };
+        return { success: false as const, error: formatVoteError(fetchError) };
     }
 
-    // Apply the voting rules.
     if (existingVote) {
-        if (existingVote.vote_type === voteType) {
-            // Clicking the same vote removes it.
-            const { error: deleteError } = await supabase
-                .from('votes')
-                .delete()
-                .eq('id', existingVote.id);
-
-            if (deleteError) return { error: deleteError.message };
-            return { success: true, action: 'unvoted' };
-        } else {
-            // Clicking the opposite vote changes the vote type.
-            const { error: updateError } = await supabase
-                .from('votes')
-                .update({ vote_type: voteType })
-                .eq('id', existingVote.id);
-
-            if (updateError) return { error: updateError.message };
-            return { success: true, action: 'toggled' };
-        }
-    } else {
-        // Insert a vote when none exists yet.
-        const { error: insertError } = await supabase
+        const { error: deleteError } = await supabase
             .from('votes')
-            .insert({
-                generation_id: generationId,
-                user_id: user.id,
-                vote_type: voteType,
-            });
+            .delete()
+            .eq('generation_id', generationId)
+            .eq('user_id', user.id)
+            .eq('vote_type', voteType);
 
-        if (insertError) return { error: insertError.message };
-        return { success: true, action: 'inserted' };
+        if (deleteError) return { success: false as const, error: formatVoteError(deleteError) };
+        return { success: true, action: 'removed' as const };
     }
+
+    const { error: insertError } = await supabase
+        .from('votes')
+        .insert({
+            generation_id: generationId,
+            user_id: user.id,
+            vote_type: voteType,
+        });
+
+    if (insertError) return { success: false as const, error: formatVoteError(insertError) };
+    return { success: true, action: 'added' as const };
 }
